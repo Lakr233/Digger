@@ -6,21 +6,13 @@
 //  Copyright © 2017年 github.cornerant. All rights reserved.
 //
 
-import UIKit
+import Foundation
 
 public let digger = "Digger"
-
-
 
 /// start download with url
 
 @discardableResult
-public func download(_ url: DiggerURL) -> DiggerSeed{
-    
-    return DiggerManager.shared.download(with: url)
-    
+public func download(_ url: DiggerURL) -> DiggerSeed {
+    DiggerManager.shared.download(with: url)
 }
-
-
-
-
