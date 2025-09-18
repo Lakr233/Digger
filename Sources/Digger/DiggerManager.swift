@@ -1,5 +1,3 @@
-
-
 //
 //  DiggerManager.swift
 //  Digger
@@ -16,6 +14,8 @@ public protocol DiggerManagerProtocol {
 
     /// Apple limit is per session,The default value is 6 in macOS, or 4 in iOS.
     var maxConcurrentTasksCount: Int { set get }
+
+    var allowsBackgroundDownload: Bool { set get }
 
     var allowsCellularAccess: Bool { set get }
 
@@ -45,6 +45,7 @@ open class DiggerManager: DiggerManagerProtocol {
     // MARK: -  property
 
     public static var shared = DiggerManager(name: digger)
+    private let name: String
     public var logLevel: LogLevel = .high
     open var startDownloadImmediately = true
     open var timeout: TimeInterval = 100
@@ -59,37 +60,53 @@ open class DiggerManager: DiggerManagerProtocol {
         didSet {
             let count = maxConcurrentTasksCount == 0 ? 1 : maxConcurrentTasksCount
             session.invalidateAndCancel()
-            session = setupSession(allowsCellularAccess, count, additionalHTTPHeaders)
+            session = setupSession(allowsBackgroundDownload, allowsCellularAccess, count, additionalHTTPHeaders)
+        }
+    }
+
+    public var allowsBackgroundDownload: Bool = false {
+        didSet {
+            session.invalidateAndCancel()
+            session = setupSession(allowsBackgroundDownload, allowsCellularAccess, maxConcurrentTasksCount, additionalHTTPHeaders)
         }
     }
 
     public var allowsCellularAccess: Bool = true {
         didSet {
             session.invalidateAndCancel()
-            session = setupSession(allowsCellularAccess, maxConcurrentTasksCount, additionalHTTPHeaders)
+            session = setupSession(allowsBackgroundDownload, allowsCellularAccess, maxConcurrentTasksCount, additionalHTTPHeaders)
         }
     }
 
     public var additionalHTTPHeaders: [String: String] = [:] {
         didSet {
             session.invalidateAndCancel()
-            session = setupSession(allowsCellularAccess, maxConcurrentTasksCount, additionalHTTPHeaders)
+            session = setupSession(allowsBackgroundDownload, allowsCellularAccess, maxConcurrentTasksCount, additionalHTTPHeaders)
         }
     }
 
     // MARK: -  lifeCycle
 
     private init(name: String) {
+        self.name = name
         DiggerCache.cachesDirectory = digger
         if name.isEmpty {
             fatalError("DiggerManager must hava a name")
         }
 
         diggerDelegate = DiggerDelegate()
-        let sessionConfiguration = URLSessionConfiguration.default
+        let sessionConfiguration: URLSessionConfiguration
+        sessionConfiguration = if allowsBackgroundDownload {
+            .background(withIdentifier: name)
+        } else {
+            .default
+        }
         sessionConfiguration.allowsCellularAccess = allowsCellularAccess
         sessionConfiguration.httpMaximumConnectionsPerHost = maxConcurrentTasksCount
         sessionConfiguration.httpAdditionalHeaders = additionalHTTPHeaders
+        if allowsBackgroundDownload {
+            sessionConfiguration.sessionSendsLaunchEvents = true
+        }
         session = URLSession(configuration: sessionConfiguration, delegate: diggerDelegate, delegateQueue: delegateQueue)
     }
 
@@ -97,12 +114,20 @@ open class DiggerManager: DiggerManagerProtocol {
         session.invalidateAndCancel()
     }
 
-    private func setupSession(_ allowsCellularAccess: Bool, _ maxDownloadTasksCount: Int, _ additionalHTTPHeaders: [String: String]) -> URLSession {
+    private func setupSession(_ allowsBackgroundDownload: Bool, _ allowsCellularAccess: Bool, _ maxDownloadTasksCount: Int, _ additionalHTTPHeaders: [String: String]) -> URLSession {
         diggerDelegate = DiggerDelegate()
-        let sessionConfiguration = URLSessionConfiguration.default
+        let sessionConfiguration: URLSessionConfiguration
+        sessionConfiguration = if allowsBackgroundDownload {
+            .background(withIdentifier: name)
+        } else {
+            .default
+        }
         sessionConfiguration.allowsCellularAccess = allowsCellularAccess
         sessionConfiguration.httpMaximumConnectionsPerHost = maxDownloadTasksCount
         sessionConfiguration.httpAdditionalHeaders = additionalHTTPHeaders
+        if allowsBackgroundDownload {
+            sessionConfiguration.sessionSendsLaunchEvents = true
+        }
         let session = URLSession(configuration: sessionConfiguration, delegate: diggerDelegate, delegateQueue: delegateQueue)
 
         return session
@@ -132,7 +157,7 @@ extension DiggerManager {
         } else {
             barrierQueue.sync(flags: .barrier) {
                 let timeout = self.timeout == 0.0 ? 100 : self.timeout
-                let diggerSeed = DiggerSeed(session: session, url: url, timeout: timeout)
+                let diggerSeed = DiggerSeed(session: session, url: url, timeout: timeout, isBackgroundDownload: self.allowsBackgroundDownload)
                 diggerSeeds[url] = diggerSeed
             }
 
@@ -145,7 +170,7 @@ extension DiggerManager {
         }
     }
 
-    public func removeDigeerSeed(for url: URL) {
+    public func removeDiggerSeed(for url: URL) {
         barrierQueue.sync(flags: .barrier) {
             diggerSeeds.removeValue(forKey: url)
             if diggerSeeds.isEmpty { diggerDelegate = nil }
@@ -261,6 +286,22 @@ public extension URLSession {
             }
         }
         let task = dataTask(with: request)
+        task.priority = URLSessionTask.defaultPriority
+        return task
+    }
+
+    func downloadTask(with url: URL, timeout: TimeInterval) -> URLSessionDownloadTask {
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: timeout)
+        let range = DiggerCache.fileSize(filePath: DiggerCache.tempPath(url: url))
+        if range > 0 {
+            if isContentRangeSupportedOn(url: url, timeout: timeout) {
+                let headRange = "bytes=" + String(range) + "-"
+                request.setValue(headRange, forHTTPHeaderField: "Range")
+            } else {
+                DiggerCache.removeTempFile(with: url)
+            }
+        }
+        let task = downloadTask(with: request)
         task.priority = URLSessionTask.defaultPriority
         return task
     }

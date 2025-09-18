@@ -61,14 +61,15 @@ public enum DiggerCache {
         }
     }
 
-    /// delete all downloaded files
+    /// delete all downloaded temp files belonging to Digger
     public static func cleanDownloadTempFiles() {
+        let diggerTmpRoot = (NSTemporaryDirectory() as NSString).appendingPathComponent(cachesDirectory)
+        guard isFileExist(atPath: diggerTmpRoot) else { return }
         do {
-            let subpaths = try FileManager.default.subpathsOfDirectory(atPath: "".tmpDir)
-            _ = subpaths.map {
-                let tempFilepath = "".tmpDir + "/" + $0
-
-                removeItem(atPath: tempFilepath)
+            let subpaths = try FileManager.default.subpathsOfDirectory(atPath: diggerTmpRoot)
+            for sub in subpaths {
+                let path = (diggerTmpRoot as NSString).appendingPathComponent(sub)
+                removeItem(atPath: path)
             }
         } catch {
             diggerLog(error)
@@ -171,14 +172,12 @@ public extension String {
         return (path as NSString).appendingPathComponent((self as NSString).lastPathComponent)
     }
 
-    var docDir: String {
-        let path = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true).last!
-        return (path as NSString).appendingPathComponent((self as NSString).lastPathComponent)
-    }
-
     var tmpDir: String {
-        let path = NSTemporaryDirectory() as NSString
-        return path.appendingPathComponent((self as NSString).lastPathComponent)
+        // Put all Digger temp artifacts under a dedicated, namespaced temp root
+        // e.g. /var/folders/.../T/<cachesDirectory>/<lastPathComponent>
+        let tmpRoot = (NSTemporaryDirectory() as NSString).appendingPathComponent(DiggerCache.cachesDirectory)
+        DiggerCache.createDirectory(atPath: tmpRoot)
+        return (tmpRoot as NSString).appendingPathComponent((self as NSString).lastPathComponent)
     }
 
     func sha1() -> String {

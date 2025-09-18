@@ -17,11 +17,22 @@ public typealias CompletionCallback = (_ completion: Result<URL>) -> Void
 public typealias Callback = (progress: ProgressCallback?, speed: SpeedCallback?, completion: CompletionCallback?)
 
 public class DiggerSeed {
-    var downloadTask: URLSessionDataTask
+    // Use URLSessionTask to support both DataTask and DownloadTask
+    var downloadTask: URLSessionTask
     var url: URL
     var progress = Progress()
     var callbacks = [Callback]()
     var cancelSemaphore: DispatchSemaphore?
+    
+    // Whether this seed uses background download (URLSessionDownloadTask)
+    let isBackgroundDownload: Bool
+    
+    // Whether completion has already been notified to avoid duplicate callbacks
+    var didNotifyCompletion: Bool = false
+    
+    // Specific completion error to be surfaced on didCompleteWithError when needed
+    var completionError: Error?
+    
     var tempPath: String {
         DiggerCache.tempPath(url: url)
     }
@@ -36,8 +47,13 @@ public class DiggerSeed {
 
     var outputStream: OutputStream?
 
-    init(session: URLSession, url: URL, timeout: TimeInterval) {
-        downloadTask = session.dataTask(with: url, timeout: timeout)
+    init(session: URLSession, url: URL, timeout: TimeInterval, isBackgroundDownload: Bool) {
+        self.isBackgroundDownload = isBackgroundDownload
+        if isBackgroundDownload {
+            downloadTask = session.downloadTask(with: url, timeout: timeout)
+        } else {
+            downloadTask = session.dataTask(with: url, timeout: timeout)
+        }
         self.url = url
     }
 
