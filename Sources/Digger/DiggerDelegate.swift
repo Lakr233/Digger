@@ -126,11 +126,14 @@ extension DiggerDelegate: URLSessionDataDelegate, URLSessionDelegate {
             notifyCompletionCallback(Result.failure(errorInfo), diggerSeed)
 
         } else {
-            // For background (download task) flow, the file should already be at temp path; for data task, data was written via stream
+            // For background download tasks, success is finalized in didFinishDownloadingTo.
+            // Do not attempt to send success here to avoid double-callbacks.
+            if diggerSeed.isBackgroundDownload { return }
+
+            // Data-task flow: data already written via stream into temp path.
             if DiggerCache.isFileExist(atPath: diggerSeed.tempPath) {
-                notifyCompletionCallback(Result.success(diggerSeed.cacheFileURL), diggerSeed)
+                notifyCompletionCallback(.success(diggerSeed.cacheFileURL), diggerSeed)
             } else {
-                // If no temp file found, treat as error
                 let error = NSError(
                     domain: DiggerErrorDomain,
                     code: DiggerError.fileInfoError.rawValue,
@@ -234,6 +237,11 @@ extension DiggerDelegate: URLSessionDownloadDelegate {
         } catch {
             diggerSeed.completionError = error
         }
+
+        // For background download success, notify completion here after persisting.
+        if diggerSeed.completionError == nil {
+            notifyCompletionCallback(.success(diggerSeed.cacheFileURL), diggerSeed)
+        }
     }
 
     public func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
@@ -283,8 +291,9 @@ extension DiggerDelegate {
     func notifyCompletionCallback(_ result: Result<URL>, _ diggerSeed: DiggerSeed) {
         guard let manager else { return }
 
-        // Prevent double notifications
+        // Prevent double notifications (set early to avoid races)
         if diggerSeed.didNotifyCompletion { return }
+        diggerSeed.didNotifyCompletion = true
 
         switch result {
         case let .failure(error as NSError):
@@ -305,7 +314,6 @@ extension DiggerDelegate {
         }
 
         manager.removeDiggerSeed(for: diggerSeed.url)
-        diggerSeed.didNotifyCompletion = true
 
         DispatchQueue.main.safeAsync {
             _ = diggerSeed.callbacks.map { $0.completion?(result) }

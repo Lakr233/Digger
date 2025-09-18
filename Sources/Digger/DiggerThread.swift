@@ -27,6 +27,9 @@ extension OperationQueue {
     static var downloadDelegateOperationQueue: OperationQueue {
         let downloadDelegateOperationQueue = OperationQueue()
         downloadDelegateOperationQueue.name = "wiki.qaq.diggerThread.downloadDelegateOperationQueue"
+        // Ensure URLSession delegate callbacks are delivered serially to avoid races
+        // between didFinishDownloadingTo and didCompleteWithError (and others).
+        downloadDelegateOperationQueue.maxConcurrentOperationCount = 1
         return downloadDelegateOperationQueue
     }
 }
