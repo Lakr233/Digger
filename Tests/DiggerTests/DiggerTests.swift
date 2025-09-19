@@ -5,7 +5,12 @@ final class DiggerTests: XCTestCase {
     override class func setUp() {
         super.setUp()
         DiggerManager.shared.logLevel = .low
-        DiggerManager.shared.allowsBackgroundDownload = false
+        // check env ALLOWS_BACKGROUND_DOWNLOAD
+        if let allowsBackgroundDownload = ProcessInfo.processInfo.environment["ALLOWS_BACKGROUND_DOWNLOAD"] {
+            DiggerManager.shared.allowsBackgroundDownload = (allowsBackgroundDownload as NSString).boolValue
+        } else {
+            DiggerManager.shared.allowsBackgroundDownload = false
+        }
         DiggerManager.shared.startDownloadImmediately = true
         DiggerManager.shared.timeout = 5
         DiggerCache.cachesDirectory = "DiggerTestsCache"
@@ -15,7 +20,6 @@ final class DiggerTests: XCTestCase {
 
     override func setUpWithError() throws {
         try super.setUpWithError()
-        // Clean cache before each test (avoid cleaning global temp)
         DiggerCache.cleanDownloadFiles()
         DiggerCache.cleanDownloadTempFiles()
     }
@@ -269,17 +273,16 @@ final class DiggerTests: XCTestCase {
 
         let expZero = expectation(description: "got zero after suspend")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { expZero.fulfill() }
-    wait(for: [expZero], timeout: 2)
-    // Accept either explicit zero-speed callback or suspended state as success
-    let isSuspended = seed.downloadTask.state == .suspended
-    XCTAssertTrue(gotZeroAfterSuspend || isSuspended)
+        wait(for: [expZero], timeout: 2)
+
+        // Accept either explicit zero-speed callback or suspended state as success
+        let isSuspended = seed.downloadTask.state == .suspended
+        XCTAssertTrue(gotZeroAfterSuspend || isSuspended)
 
         // Cleanup to avoid long-running slow download
         DiggerManager.shared.cancelTask(for: url)
     }
-}
 
-final class DiggerTimeoutTests: XCTestCase {
     func testTimeoutOnUnreachable() throws {
         // Set a very low timeout and hit an unroutable IP to force timeout
         let original = DiggerManager.shared.timeout
@@ -296,100 +299,5 @@ final class DiggerTimeoutTests: XCTestCase {
         wait(for: [exp], timeout: 5)
         XCTAssertNotNil(error)
         if let e = error { XCTAssertEqual(e.code, .timedOut) }
-    }
-}
-
-final class DiggerBackgroundTests: XCTestCase {
-    override class func setUp() {
-        super.setUp()
-        DiggerManager.shared.logLevel = .low
-        DiggerManager.shared.allowsBackgroundDownload = true
-        DiggerManager.shared.startDownloadImmediately = true
-        DiggerManager.shared.timeout = 5
-        DiggerCache.cachesDirectory = "DiggerBackgroundTestsCache"
-        DiggerCache.cleanDownloadFiles()
-        DiggerCache.cleanDownloadTempFiles()
-    }
-
-    override func setUpWithError() throws {
-        try super.setUpWithError()
-        DiggerCache.cleanDownloadFiles()
-        DiggerCache.cleanDownloadTempFiles()
-    }
-
-    override class func tearDown() {
-        // Reset to non-background to avoid side effects on other tests
-        DiggerManager.shared.allowsBackgroundDownload = false
-        super.tearDown()
-    }
-
-    private func serverURL(_ path: String) -> URL { URL(string: "http://127.0.0.1:18080\(path)")! }
-
-    private func ensureServerAvailable() -> Bool {
-        let url = serverURL("/hello.txt")
-        let exp = expectation(description: "ping server (bg)")
-        var ok = false
-        URLSession.shared.dataTask(with: url) { data, resp, _ in
-            if let http = resp as? HTTPURLResponse, http.statusCode == 200, let data, String(data: data, encoding: .utf8)?.contains("hello") == true {
-                ok = true
-            }
-            exp.fulfill()
-        }.resume()
-        wait(for: [exp], timeout: 3)
-        return ok
-    }
-
-    func testBackgroundSmallDownload() throws {
-        try XCTSkipUnless(ensureServerAvailable(), "Dev server not running on 127.0.0.1:18080")
-
-        let url = serverURL("/hello.txt")
-        let exp = expectation(description: "bg small finished")
-        var resultURL: URL?
-        download(url).completion { result in
-            switch result {
-            case let .success(u): resultURL = u
-            case let .failure(e): XCTFail("bg download failed: \(e)")
-            }
-            exp.fulfill()
-        }
-        wait(for: [exp], timeout: 10)
-
-        XCTAssertNotNil(resultURL)
-        if let u = resultURL {
-            let data = try Data(contentsOf: u)
-            XCTAssertEqual(String(data: data, encoding: .utf8), "hello from nginx\n")
-        }
-    }
-
-    func testBackgroundSuspendResumeSameTask() throws {
-        try XCTSkipUnless(ensureServerAvailable(), "Dev server not running on 127.0.0.1:18080")
-
-        let url = serverURL("/bigfile.bin")
-        let seed = DiggerManager.shared.download(with: url)
-
-        // Wait for some progress
-        let expProg = expectation(description: "bg got progress")
-        var gotProg = false
-        seed.progress { prog in
-            if !gotProg && prog.completedUnitCount > 0 { gotProg = true; expProg.fulfill() }
-        }
-        wait(for: [expProg], timeout: 10)
-        XCTAssertTrue(gotProg)
-
-        // Suspend the same task
-        DiggerManager.shared.stopTask(for: url)
-
-        // Resume the same task
-        let exp = expectation(description: "bg resume finished")
-        seed.completion { result in
-            if case let .failure(e) = result { XCTFail("bg resume failed: \(e)") }
-            exp.fulfill()
-        }
-        DiggerManager.shared.startTask(for: url)
-        wait(for: [exp], timeout: 30)
-
-        let cachePath = DiggerCache.cachePath(url: url)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: cachePath))
-        XCTAssertEqual(DiggerCache.fileSize(filePath: cachePath), 10 * 1024 * 1024)
     }
 }

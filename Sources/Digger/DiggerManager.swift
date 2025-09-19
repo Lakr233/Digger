@@ -21,6 +21,7 @@ public protocol DiggerManagerProtocol {
 
     var additionalHTTPHeaders: [String: String] { set get }
 
+    /// Note that this timeout interval is applied only when `allowsBackgroundDownload = false`,
     var timeout: TimeInterval { set get }
 
     /// Start the task at once,default is true
@@ -101,12 +102,14 @@ open class DiggerManager: DiggerManagerProtocol {
         } else {
             .default
         }
+
         sessionConfiguration.allowsCellularAccess = allowsCellularAccess
         sessionConfiguration.httpMaximumConnectionsPerHost = maxConcurrentTasksCount
         sessionConfiguration.httpAdditionalHeaders = additionalHTTPHeaders
         if allowsBackgroundDownload {
             sessionConfiguration.sessionSendsLaunchEvents = true
         }
+
         session = URLSession(configuration: sessionConfiguration, delegate: diggerDelegate, delegateQueue: delegateQueue)
     }
 
@@ -122,14 +125,15 @@ open class DiggerManager: DiggerManagerProtocol {
         } else {
             .default
         }
+
         sessionConfiguration.allowsCellularAccess = allowsCellularAccess
         sessionConfiguration.httpMaximumConnectionsPerHost = maxDownloadTasksCount
         sessionConfiguration.httpAdditionalHeaders = additionalHTTPHeaders
         if allowsBackgroundDownload {
             sessionConfiguration.sessionSendsLaunchEvents = true
         }
-        let session = URLSession(configuration: sessionConfiguration, delegate: diggerDelegate, delegateQueue: delegateQueue)
 
+        let session = URLSession(configuration: sessionConfiguration, delegate: diggerDelegate, delegateQueue: delegateQueue)
         return session
     }
 
