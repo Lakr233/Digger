@@ -1,24 +1,14 @@
-//
-//  DiggerHelper.swift
-//  Digger
-//
-//  Created by ant on 2017/10/26.
-//  Copyright © 2017年 github.cornerant. All rights reserved.
-//
-
 import Foundation
 
-// MARK: -  result help
+// MARK: - Result
 
-public enum Result<T> {
-    case failure(Error)
-    case success(T)
-}
+public typealias DiggerResult = Swift.Result<URL, any Error>
 
-// MARK: -  error help
+// MARK: - Error
 
 public let DiggerErrorDomain = "DiggerError"
-public enum DiggerError: Int {
+
+public enum DiggerError: Int, Sendable {
     case badURL = 9981
     case fileIsExist = 9982
     case fileInfoError = 9983
@@ -27,34 +17,34 @@ public enum DiggerError: Int {
     case downloadCanceled = -999
 }
 
-// MARK: -  error help
+// MARK: - Log Level
 
-public enum LogLevel {
+public enum LogLevel: Sendable {
     case high, low, none
 }
 
-public func diggerLog(_ info: some Any, file: NSString = #file, method: String = #function, line: Int = #line) {
+public func diggerLog(_ info: some Any, file: String = #file, method: String = #function, line: Int = #line) {
+    let message: String
     switch DiggerManager.shared.logLevel {
     case .none:
-        _ = ""
-
+        return
     case .low:
-        print("*************** Digger Log ****************")
-        print("\(info)" + "\n")
-
+        message = "[Digger] \(info)"
     case .high:
-        print("*************** Digger Log ****************")
-        print("file   : " + "\(file.lastPathComponent)" + "\n"
-            + "method : " + "\(method)" + "\n"
-            + "line   : " + "[\(line)]:" + "\n"
-            + "info   : " + "\(info)"
-        )
+        let fileName = (file as NSString).lastPathComponent
+        message = "[Digger] \(fileName):\(line) \(method) — \(info)"
+    }
+
+    if let handler = DiggerLogging.handler {
+        handler(message, file, method, line)
+    } else {
+        print(message)
     }
 }
 
-// MARK: - url helper
+// MARK: - URL Helper
 
-public protocol DiggerURL {
+public protocol DiggerURL: Sendable {
     func asURL() throws -> URL
 }
 
@@ -64,9 +54,7 @@ extension String: DiggerURL {
             throw NSError(
                 domain: DiggerErrorDomain,
                 code: DiggerError.badURL.rawValue,
-                userInfo: [
-                    NSLocalizedDescriptionKey: NSLocalizedString("Invalid URL", comment: ""),
-                ]
+                userInfo: [NSLocalizedDescriptionKey: "Invalid URL"],
             )
         }
         return url
