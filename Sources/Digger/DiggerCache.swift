@@ -13,7 +13,12 @@ public enum DiggerCache: Sendable {
     }
 
     static func cachePath(url: URL) -> String {
-        cachesDirectory.cacheDir + "/" + url.lastPathComponent
+        // Use hash-based file name to prevent path traversal from malicious server file names.
+        // Preserve the original file extension for MIME type inference.
+        let ext = url.pathExtension
+        let hash = url.absoluteString.digestHash()
+        let fileName = ext.isEmpty ? hash : "\(hash).\(ext)"
+        return cachesDirectory.cacheDir + "/" + fileName
     }
 
     static func removeTempFile(with url: URL) {

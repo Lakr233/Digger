@@ -56,30 +56,53 @@ extension DiggerDelegate: URLSessionDataDelegate {
             return
         }
 
-        guard let responseHeaders = (response as? HTTPURLResponse)?.allHeaderFields as? [String: String] else {
+        guard let httpResponse = response as? HTTPURLResponse,
+              let responseHeaders = httpResponse.allHeaderFields as? [String: String]
+        else {
             return
         }
 
-        if let fullRange = responseHeaders["Content-Range"],
+        let isPartialContent = httpResponse.statusCode == 206
+        let sentRangeHeader = dataTask.originalRequest?.value(forHTTPHeaderField: "Range") != nil
+
+        // If we sent a Range header (resuming) but the server returned 200 instead of 206,
+        // the server does not support Content-Range. Abort — all Digger downloads require
+        // range support for reliable resume.
+        if sentRangeHeader, !isPartialContent {
+            let error = NSError(
+                domain: DiggerErrorDomain,
+                code: DiggerError.invalidStatusCode.rawValue,
+                userInfo: [
+                    "statusCode": httpResponse.statusCode,
+                    NSLocalizedDescriptionKey: "Server does not support Content-Range for resume",
+                ],
+            )
+            DiggerCache.removeTempFile(with: url)
+            notifyCompletionCallback(.failure(error), diggerSeed)
+            return
+        }
+
+        if isPartialContent,
+           let fullRange = responseHeaders["Content-Range"],
            let total = fullRange.components(separatedBy: "/").last,
            let value = Int64(total)
         {
             diggerSeed.progress.totalUnitCount = value
-        } else if diggerSeed.progress.completedUnitCount == 0 {
+
+            if let completedBytesString = fullRange
+                .components(separatedBy: "-")
+                .first?
+                .components(separatedBy: " ")
+                .last,
+               let completedBytes = Int64(completedBytesString)
+            {
+                diggerSeed.progress.completedUnitCount = completedBytes
+            }
+        } else {
             diggerSeed.progress.totalUnitCount = response.expectedContentLength
         }
 
-        if let completedBytesString = responseHeaders["Content-Range"]?
-            .components(separatedBy: "-")
-            .first?
-            .components(separatedBy: " ")
-            .last,
-            let completedBytes = Int64(completedBytesString)
-        {
-            diggerSeed.progress.completedUnitCount = completedBytes
-        }
-
-        diggerSeed.outputStream = OutputStream(toFileAtPath: diggerSeed.tempPath, append: true)
+        diggerSeed.outputStream = OutputStream(toFileAtPath: diggerSeed.tempPath, append: isPartialContent)
         diggerSeed.outputStream?.open()
         diggerLog("start to download  \n" + url.absoluteString)
         completionHandlerCalled = true

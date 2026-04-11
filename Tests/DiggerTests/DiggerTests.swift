@@ -37,10 +37,21 @@ struct DiggerCacheTests {
         #expect(hash1 != hash2)
     }
 
-    @Test func cachePathContainsFileName() {
+    @Test func cachePathUsesHashWithExtension() {
         let url = URL(string: "https://example.com/track.m4a")!
         let path = DiggerCache.cachePath(url: url)
-        #expect(path.hasSuffix("track.m4a"))
+        #expect(path.hasSuffix(".m4a"))
+        #expect(path.contains("Caches"))
+        // Must not contain the raw file name (hash-based)
+        #expect(!path.contains("track.m4a"))
+    }
+
+    @Test func cachePathPreventPathTraversal() {
+        let url = URL(string: "https://evil.com/../../etc/passwd")!
+        let path = DiggerCache.cachePath(url: url)
+        #expect(!path.contains(".."))
+        #expect(!path.contains("etc"))
+        #expect(!path.contains("passwd"))
     }
 
     @Test func tempPathIsDeterministic() {
